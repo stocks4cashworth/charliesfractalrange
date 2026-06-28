@@ -1,14 +1,14 @@
 function calculateMasterFractalMatrix() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sourceSheet = ss.getSheetByName("Sheet7"); 
-  var outputSheet = ss.getSheetByName("Sheet8");
+  var outputSheet = ss.getSheetByName("Hurst Summary");
   
   if (!sourceSheet) {
     SpreadsheetApp.getUi().alert("Error: Sheet7 not found.");
     return;
   }
   if (!outputSheet) {
-    outputSheet = ss.insertSheet("Sheet8");
+    outputSheet = ss.insertSheet("Hurst Summary");
   }
   
   var lastRow = sourceSheet.getLastRow();
@@ -121,16 +121,16 @@ function calculateMasterFractalMatrix() {
   }
   
   // 3. Clean and reprint the summary layout perfectly
-  outputSheet.clear();
+  //outputSheet.clear();
   
   // Write the foundational info block at the top
-  outputSheet.getRange("A1").setValue("MULTI-DURATION FRACTAL RISK RANGES").setFontWeight("bold");
-  outputSheet.getRange("A2").setValue("Latest Anchor Close:");
-  outputSheet.getRange("B2").setValue(latestClose).setFontWeight("bold");
+  outputSheet.getRange("A20").setValue("MULTI-DURATION FRACTAL RISK RANGES").setFontWeight("bold");
+  outputSheet.getRange("A21").setValue("Latest Anchor Close:");
+  outputSheet.getRange("B20").setValue(latestClose).setFontWeight("bold");
   
   // Paste our master metrics table starting on row 5
-  outputSheet.getRange(5, 1, matrixTable.length, 11).setValues(matrixTable);
-  outputSheet.getRange(5, 1, 1, 11).setFontWeight("bold").setBackground("#f3f3f3");
+  outputSheet.getRange(22, 1, matrixTable.length, 11).setValues(matrixTable);
+  outputSheet.getRange(22, 1, 1, 11).setFontWeight("bold").setBackground("#f3f3f3");
   
   // Format price columns cleanly as currency (Mean Price, Upper Range, Lower Range move to columns 8, 9, 10)
   if (rowsAdded > 0) {
