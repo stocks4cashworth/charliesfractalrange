@@ -145,7 +145,7 @@ function calculateHurstMatrix1() {
   outputSheet.getRange("O7").setFormula("=SLOPE(I" + longStartRow + ":I" + longLastRow + ", G" + longStartRow + ":G" + longLastRow + ")");
   
   // Automatically pass variables down to generate the execution boxes
-  generateHurstSignals();
+  //generateHurstSignals();
 }
 
 // RESTORED HELPER FUNCTION: Calculates R/S for a single discrete array of data
