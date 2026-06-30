@@ -1,4 +1,4 @@
-function calculateHurstMatrix1() {
+function calculateHurstMatrix() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sourceSheet = ss.getSheetByName("Sheet7"); 
   
