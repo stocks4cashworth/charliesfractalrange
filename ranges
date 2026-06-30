@@ -1,5 +1,5 @@
 
-function generateHurstSignals() {
+function generateHurstranges() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var summarySheet = ss.getSheetByName("Hurst Summary");
   var sourceSheet = ss.getSheetByName("Sheet7");
