@@ -1,6 +1,6 @@
-function calculateHurstMatrix1() {
+function calculateHurstMatrix() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sourceSheet = ss.getSheetByName("Sheet7"); 
+  var sourceSheet = ss.getSheetByName("Sheet3"); 
   
   // 1. Get log returns from Column G (Row 2 down to last row)
   var lastRow = sourceSheet.getLastRow();
