@@ -5,7 +5,10 @@ function onOpen() {
       .addItem('hurst', 'calculateHurstMatrix')
       .addItem('hurstbyperiod', 'calculateMasterFractalMatrix')
       .addItem('Volatility', 'calculatePriceAndVolumeVolatility')
-      
+      .addSeparator()
+      .addItem('createUnifiedChart', 'createUnifiedChart')
+      .addSeparator()
+      .addItem('populateRollingHurstColumns', 'populateRollingHurstColumns')
       .addSeparator()
 
       .addToUi();
