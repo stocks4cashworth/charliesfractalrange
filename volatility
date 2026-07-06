@@ -1,0 +1,190 @@
+function populateRollingHurstColumns() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Sheet3");
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 3) return; // Not enough data
+  
+  // 1. Fetch all Log Returns from Column G (Column 7)
+  var allReturns = sheet.getRange(2, 7, lastRow - 1, 1).getValues().flat();
+  
+  // Define our window columns mapping: Column H=8 (7), I=9 (21), J=10 (30), K=11 (60), L=12 (90)
+  var windows = [7,14,21, 30, 60, 90];
+  var startColumn = 8; // Column H is the 8th column
+  
+  // 2. We want to process at least the past 30 days (or more depending on data size)
+  // Let's calculate the starting row index for the processing loop
+  var processPastNDays = 30;
+  var startProcessingIndex = Math.max(0, allReturns.length - processPastNDays);
+  
+  // Create an empty grid matching the rows to update so we can batch write efficiently
+  var numRowsToUpdate = allReturns.length - startProcessingIndex;
+  var outputGrid = [];
+  
+  // 3. Loop through the target rows from past 30 days to today
+  for (var i = startProcessingIndex; i < allReturns.length; i++) {
+    var rowData = [];
+    
+    // Compute Hurst for each window size
+    for (var w = 0; w < windows.length; w++) {
+      var n = windows[w];
+      
+      // Lookback check: do we have enough historical data points prior to this row?
+      if (i + 1 < n) {
+        rowData.push(""); // Not enough history yet for this window size, leave blank
+        continue;
+      }
+      
+      // Slice out the lookback window up to the current day
+      var subSeries = allReturns.slice(i - n + 1, i + 1);
+      
+      // Clean subseries from any text/errors just in case
+      var cleanSeries = subSeries.filter(val => val !== "" && !isNaN(val));
+      
+      if (cleanSeries.length === n) {
+        var rs = computeSingleRS(cleanSeries);
+        if (rs !== null && rs > 0) {
+          // Direct Hurst Estimation formula: H = log(R/S) / log(n)
+          var hurst = Math.log10(rs) / Math.log10(n);
+          rowData.push(hurst);
+        } else {
+          rowData.push("");
+        }
+      } else {
+        rowData.push("");
+      }
+    }
+    outputGrid.push(rowData);
+  }
+  
+  // 4. Batch write the calculated values straight into columns H through L
+  // Row number in sheet is index + 2 (because arrays are 0-based and row 1 is header)
+  var destinationRow = startProcessingIndex + 2; 
+  sheet.getRange(destinationRow, startColumn, numRowsToUpdate, windows.length).setValues(outputGrid);
+  
+  SpreadsheetApp.getUi().alert("Rolling Hurst values populated for the last " + numRowsToUpdate + " rows!");
+}
+
+// Mathematical engine (Kept identical to your core logic)
+function computeSingleRS(series) {
+  var n = series.length;
+  var mean = series.reduce((a, b) => a + b, 0) / n;
+  
+  var cumDev = 0;
+  var maxDev = 0;
+  var minDev = 0;
+  var sumSqDist = 0;
+  
+  for (var j = 0; j < n; j++) {
+    var dev = series[j] - mean;
+    cumDev += dev;
+    if (cumDev > maxDev) maxDev = cumDev;
+    if (cumDev < minDev) minDev = cumDev;
+    
+    sumSqDist += Math.pow(dev, 2);
+  }
+  
+  var range = maxDev - minDev;
+  var stDev = Math.sqrt(sumSqDist / (n - 1));
+  
+  return (stDev > 0) ? (range / stDev) : null;
+}
+
+
+function populateAllRollingHursts() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Sheet3");
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 3) return; 
+  
+  // 1. Fetch Log Returns (Col 7 / G) and Volume Log Changes (Col 14 / n)
+  var priceReturns = sheet.getRange(2, 7, lastRow - 1, 1).getValues().flat();
+  var volumeChanges = sheet.getRange(2, 14, lastRow - 1, 1).getValues().flat();
+  
+  var windows = [7,14, 21, 30, 60, 90];
+  
+  // Define how far back we want to calculate (e.g., past 30 rows)
+  var processPastNDays = 30;
+  var startProcessingIndex = Math.max(0, priceReturns.length - processPastNDays);
+  var numRowsToUpdate = priceReturns.length - startProcessingIndex;
+  
+  // Two separate grids for batch writing
+  var priceOutputGrid = [];
+  var volumeOutputGrid = [];
+  
+  // 2. Loop through the target rows
+  for (var i = startProcessingIndex; i < priceReturns.length; i++) {
+    var priceRowData = [];
+    var volumeRowData = [];
+    
+    for (var w = 0; w < windows.length; w++) {
+      var n = windows[w];
+      
+      if (i + 1 < n) {
+        priceRowData.push("");
+        volumeRowData.push("");
+        continue;
+      }
+      
+      // Slice out windows for both metrics
+      var priceSubSeries = priceReturns.slice(i - n + 1, i + 1).filter(val => val !== "" && !isNaN(val));
+      var volumeSubSeries = volumeChanges.slice(i - n + 1, i + 1).filter(val => val !== "" && !isNaN(val));
+      
+      // Calculate Price Hurst
+      if (priceSubSeries.length === n) {
+        var rsPrice = computeSingleRS(priceSubSeries);
+        priceRowData.push((rsPrice !== null && rsPrice > 0) ? Math.log10(rsPrice) / Math.log10(n) : "");
+      } else {
+        priceRowData.push("");
+      }
+      
+      // Calculate Volume Hurst
+      if (volumeSubSeries.length === n) {
+        var rsVolume = computeSingleRS(volumeSubSeries);
+        volumeRowData.push((rsVolume !== null && rsVolume > 0) ? Math.log10(rsVolume) / Math.log10(n) : "");
+      } else {
+        volumeRowData.push("");
+      }
+    }
+    
+    priceOutputGrid.push(priceRowData);
+    volumeOutputGrid.push(volumeRowData);
+  }
+  
+  // 3. Batch Write Results to Sheet3
+  var destinationRow = startProcessingIndex + 2; 
+  
+  // Write Price Hurst to Columns H:L (Columns 8-12)
+  sheet.getRange(destinationRow, 8, numRowsToUpdate, windows.length).setValues(priceOutputGrid);
+  
+  // Write Volume Hurst to Columns m:s (Columns 15-19)
+  sheet.getRange(destinationRow, 15, numRowsToUpdate, windows.length).setValues(volumeOutputGrid);
+  
+  SpreadsheetApp.getUi().alert("Rolling Price and Volume Hurst values updated successfully!");
+}
+
+// Math Engine
+function computeSingleRS(series) {
+  var n = series.length;
+  var mean = series.reduce((a, b) => a + b, 0) / n;
+  
+  var cumDev = 0;
+  var maxDev = 0;
+  var minDev = 0;
+  var sumSqDist = 0;
+  
+  for (var j = 0; j < n; j++) {
+    var dev = series[j] - mean;
+    cumDev += dev;
+    if (cumDev > maxDev) maxDev = cumDev;
+    if (cumDev < minDev) minDev = cumDev;
+    
+    sumSqDist += Math.pow(dev, 2);
+  }
+  
+  var range = maxDev - minDev;
+  var stDev = Math.sqrt(sumSqDist / (n - 1));
+  
+  return (stDev > 0) ? (range / stDev) : null;
+}
