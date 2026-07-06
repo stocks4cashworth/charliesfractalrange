@@ -1,14 +1,13 @@
-
 function calculateMasterFractalMatrix() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sourceSheet = ss.getSheetByName("Sheet7"); 
-  var outputSheet = ss.getSheetByName("Sheet8");
+  var sourceSheet = ss.getSheetByName("Sheet1"); 
+  var outputSheet = ss.getSheetByName("Sheet1");
   if (!sourceSheet) {
     SpreadsheetApp.getUi().alert("Error: Sheet7 not found.");
     return;
   }
   if (!outputSheet) {
-    outputSheet = ss.insertSheet("Sheet8");
+    outputSheet = ss.insertSheet("Sheet1");
   }
   
   var lastRow = sourceSheet.getLastRow();
@@ -39,7 +38,7 @@ function calculateMasterFractalMatrix() {
   var validCloses = allCloses.slice(0, trueLastRowIndex).filter(function(v) { return v !== "" && !isNaN(v) && !isNaN(parseFloat(v)) && v !== null; });
   
   // Explicit 7 duration horizons
-  var timeframes = [7, 14, 21, 30, 60, 90, 120];
+  var timeframes = [7,14,21,30,60,90];
   
   // Setup headers for the master dashboard output (12 Columns Wide)
   var matrixTable = [[
@@ -154,16 +153,16 @@ function calculateMasterFractalMatrix() {
     generateFractalRangeChart();
   }
   
-  SpreadsheetApp.getUi().alert("Master Matrix fully updated with Rescaled Ranges and Fractal Boundaries!");
+  //SpreadsheetApp.getUi().alert("Master Matrix fully updated with Rescaled Ranges and Fractal Boundaries!");
 }
 
 /**
  * INTERNAL HELPER: Strictly maps formatting to Column C (Price Hurst) 
  * and Column E (Volume Hurst) dynamically for Sheet8
  */
-function applyMatrixHurstFormatting(sheet, rowsCount) {
-  var priceHurstRange = sheet.getRange(6, 3, rowsCount, 1);
-  var volumeHurstRange = sheet.getRange(6, 5, rowsCount, 1);
+function applyMatrixHurstFormatting(sheet) {
+  var priceHurstRange = sheet.getRange(6, 3, 7, 1);
+  var volumeHurstRange = sheet.getRange(6, 5, 7, 1);
   var targetRanges = [priceHurstRange, volumeHurstRange];
   
   var rules = sheet.getConditionalFormatRules();
@@ -187,7 +186,55 @@ function applyMatrixHurstFormatting(sheet, rowsCount) {
   });
   
   sheet.setConditionalFormatRules(rules);
+
 }
+
+/**
+ * INTERNAL HELPER: Compares H6:H12 against a static anchor in B2.
+ * Above B2 = Red, Below B2 = Green.
+ */
+function applytrendFormatting(sheet) {
+ var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  
+  var rules =sheet.getConditionalFormatRules();
+  
+  // Target range is exactly H6:H12
+  // getRange(startRow, startColumn, numRows, numColumns)
+  var targetRange = sheet.getRange(6, 8, 7, 1); 
+  
+  // Define Soft Hex Colors
+  var redBg     = "#FCE8E6"; 
+  var redFont   = "#1f1f1f";
+  var greenBg   = "#E6F4EA"; 
+  var greenFont = "#1f1f1f";
+
+  // RULE 1: Above Anchor (Red) -> If cell in H is greater than B2
+  // We use $B$2 so it doesn't shift as it checks H6 through H12
+  var ruleAbove = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied("=H7<$B$2") 
+    .setBackground(redBg)
+    .setFontColor(redFont)
+    .setRanges([targetRange])
+    .build();
+    
+  // RULE 2: Below Anchor (Green) -> If cell in H is less than B2
+  var ruleBelow = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied("=H7>$B$2")
+    .setBackground(greenBg)
+    .setFontColor(greenFont)
+    .setRanges([targetRange])
+    .build();
+    
+  rules.push(ruleAbove, ruleBelow);
+  sheet.setConditionalFormatRules(rules);
+
+  SpreadsheetApp.getUi().alert("Master Matrix fully updated with Rescaled Ranges and Fractal Boundaries!");
+}
+
+
+
+
+
 
 // Helper Function: Rescaled Range (R/S) Engine
 function computeSingleRS(series) {
@@ -236,7 +283,7 @@ function calculateStDev(array) {
  */
 function generateFractalRangeChart() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Sheet8");
+  var sheet = ss.getSheetByName("Sheet1");
   
   if (!sheet) {
     SpreadsheetApp.getUi().alert("Error: 'Sheet8' not found.");
@@ -265,9 +312,18 @@ function generateFractalRangeChart() {
   }
   
   // 4. Compute the vertical axis boundaries (+/-10% of the anchor price)
-  var vAxisMin = latestClose * 0.90;
-  var vAxisMax = latestClose * 1.10;
+  // 1. Get the values from the ranges (returns a 2D array like [[val1], [val2]])
+  var jValues = sheet.getRange("J6:J13").getValues().flat();
+  var iValues = sheet.getRange("I6:I13").getValues().flat();
   
+  // 2. Use Math.min and Math.max with the spread operator (...)
+  var vAxisMin = Math.min(...jValues);
+  var vAxisMax = Math.max(...iValues);
+  
+  Logger.log("Min: " + vAxisMin);
+  Logger.log("Max: " + vAxisMax);
+
+
   // 5. Build the Chart and customize series colors
   // Series indexing:
   // Series 0 (Column H) = Period Mean Price -> Blue (#0000FF)
@@ -277,11 +333,11 @@ function generateFractalRangeChart() {
     .setChartType(Charts.ChartType.LINE)
     .addRange(domainRange)
     .addRange(seriesRange)
-    .setPosition(6, 12, 10, 0) // Places chart on row 6, column L (next to your data matrix)
+    .setPosition(1, 14, 10, 5) // Places chart on row 6, column L (next to your data matrix)
     .setOption('title', 'Fractal Risk Ranges vs. Lookback Horizons')
-    .setOption('curveType', 'function') // Smooths lines cleanly across horizons
-    .setOption('width', 750)
-    .setOption('height', 450)
+    //.setOption('curveType', 'function') // Smooths lines cleanly across horizons
+    .setOption('width', 500)
+    .setOption('height', 300)
     .setOption('hAxis', {
       title: 'Lookback Window Size (n)',
       type: 'category' 
@@ -296,5 +352,78 @@ function generateFractalRangeChart() {
     .setOption('legend', { position: 'bottom' });
     
   sheet.insertChart(chartBuilder.build());
+  createLineChart();
 }
 
+
+
+
+
+
+function createLineChart() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Sheet1"); 
+  
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 21) {
+    Logger.log("Not enough data to create a chart.");
+    return;
+  }
+  
+  // 1. Clear any previous versions of this chart to keep the sheet clean
+  var charts = sheet.getCharts();
+  for (var i = 0; i < charts.length; i++) {
+    var chartOptions = charts[i].getOptions();
+    var existingTitle = chartOptions.get('title');
+    
+    // Check for our new title or the previous placeholder title
+    if (existingTitle === 'Price over Time' || existingTitle === 'Data Trend Over Time') {
+      sheet.removeChart(charts[i]);
+    }
+  }
+  
+  // 2. Define the ranges
+  var dateRange = sheet.getRange(21, 1, lastRow - 21 + 1, 1); // Column A
+  var dataRange = sheet.getRange(21, 5, lastRow - 21 + 1, 1); // Column E
+  
+  // 3. Get data numbers to calculate Min/Max
+  var dataValues = sheet.getRange(22, 5, lastRow - 22 + 1, 1).getValues().flat();
+  var numericValues = dataValues.filter(function(val) {
+    return typeof val === 'number' && !isNaN(val);
+  });
+
+  var dataMin = Math.min(...numericValues);
+  var dataMax = Math.max(...numericValues);
+  
+  var paddingPercent = 0.10; 
+  var rangeSpread = dataMax - dataMin;
+  
+  var yAxisMin = dataMin - (rangeSpread * paddingPercent);
+  var yAxisMax = dataMax + (rangeSpread * paddingPercent);
+  
+  // 4. Build the Line Chart with smaller title styling
+  var chartBuilder = sheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(dateRange) 
+    .addRange(dataRange) 
+    .setPosition(15, 4, 0, 0) // Places at D15
+    .setOption('title', 'Price over Time')
+    // Make the title font smaller (default is usually 14 or 16)
+    .setOption('titleTextBoxStyle', {
+      textStyle: {
+        fontSize: 11,
+        bold: true
+      }
+    })
+    .setOption('legend', {position: 'bottom'})
+    .setOption('useFirstRowAsHeaders', true)
+    .setOption('vAxis', {
+      viewWindow: {
+        min: yAxisMin,
+        max: yAxisMax
+      }
+    });
+    
+  // 5. Insert the fresh chart
+  sheet.insertChart(chartBuilder.build());
+}
