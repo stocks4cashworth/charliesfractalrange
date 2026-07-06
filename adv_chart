@@ -69,8 +69,8 @@ function createUnifiedChart() {
   // 9. Safely isolate options to prevent internal method property crashes
   var vAxisOptions = {
     viewWindow: {
-      min: minrange * 0.95, 
-      max: maxrange * 1.05  
+      min: minrange * 0.85, 
+      max: maxrange * 1.15  
     }
   };
 
@@ -78,7 +78,7 @@ function createUnifiedChart() {
   var chartBuilder = targetSheet.newChart()
     .setChartType(Charts.ChartType.LINE)
     .addRange(chartRange)
-    .setPosition(15, 4, 0, 0) 
+    .setPosition(15, 4, 10, 10) 
     .setOption('title', 'Price & Fractal Range Projection')
     .setOption('titleTextBoxStyle', { textStyle: { fontSize: 11, bold: true } })
     .setOption('legend', { position: 'bottom' })
