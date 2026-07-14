@@ -1,0 +1,128 @@
+/**
+ * Generates a Forward-Projected Fractal Range Deviation Chart on Sheet3.
+ * Maps the actual lookback timeline (Today + 7 days to Today + 90 days) on the X-axis,
+ * and the Buy/Sell risk boundaries on the Y-axis relative to the closing price anchored at 0.
+ * Compares the last row (solid lines) against the previous row (dashed lines).
+ */
+function generateFractalDeviationChart() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName("Sheet1");
+  var targetSheet = ss.getSheetByName("Sheet4");
+  
+  if (!sourceSheet) {
+    SpreadsheetApp.getUi().alert("Error: 'Sheet1' (source data) not found.");
+    return;
+  }
+  
+  if (!targetSheet) {
+    targetSheet = ss.insertSheet("Sheet4");
+  }
+  
+  var lastRow = sourceSheet.getLastRow();
+  if (lastRow < 4) {
+    SpreadsheetApp.getUi().alert("Error: Not enough historical data rows in Sheet1 to extract a two-day comparison.");
+    return;
+  }
+  
+  // 1. Clear preexisting charts with this specific title on Sheet3
+  var charts = targetSheet.getCharts();
+  for (var i = 0; i < charts.length; i++) {
+    if (charts[i].getOptions().get('title') === 'Risk Range Deviation Matrix (Forward Timeline Projections)') {
+      targetSheet.removeChart(charts[i]);
+    }
+  }
+  
+  // 2. Define the lookback periods and their corresponding Sheet1 column pairs (Upper, Lower)
+  var timeframes = [7, 14, 21, 30, 60, 90];
+  var rangeColumnPairs = [
+    { upper: 13, lower: 14 }, // 7d
+    { upper: 19, lower: 20 }, // 14d
+    { upper: 25, lower: 26 }, // 21d
+    { upper: 31, lower: 32 }, // 30d
+    { upper: 37, lower: 38 }, // 60d
+    { upper: 43, lower: 44 }  // 90d
+  ];
+  
+  // Row indices for Today (last row) and Yesterday (second to last row)
+  var rowToday = lastRow;
+  var rowYesterday = lastRow - 1;
+  
+  // Fetch closing prices (Column E / 5)
+  var closeToday = parseFloat(sourceSheet.getRange(rowToday, 5).getValue());
+  var closeYesterday = parseFloat(sourceSheet.getRange(rowYesterday, 5).getValue());
+  
+  // 3. Build a normalized workspace data table mapping out the timeline
+  var workspaceDataTable = [
+    ["Timeline Horizon", "Today Upper Dev", "Today Lower Dev", "Yesterday Upper Dev", "Yesterday Lower Dev"]
+  ];
+  
+  for (var t = 0; t < timeframes.length; t++) {
+    // Today's deviations relative to today's close
+    var upToday = parseFloat(sourceSheet.getRange(rowToday, rangeColumnPairs[t].upper).getValue());
+    var loToday = parseFloat(sourceSheet.getRange(rowToday, rangeColumnPairs[t].lower).getValue());
+    var devUpToday = !isNaN(upToday) ? (upToday - closeToday) : "";
+    var devLoToday = !isNaN(loToday) ? (loToday - closeToday) : "";
+    
+    // Yesterday's deviations relative to yesterday's close
+    var upYest = parseFloat(sourceSheet.getRange(rowYesterday, rangeColumnPairs[t].upper).getValue());
+    var loYest = parseFloat(sourceSheet.getRange(rowYesterday, rangeColumnPairs[t].lower).getValue());
+    var devUpYest = !isNaN(upYest) ? (upYest - closeYesterday) : "";
+    var devLoYest = !isNaN(loYest) ? (loYest - closeYesterday) : "";
+    
+    // Set X-axis string to reflect the actual target day in the future (+7d, +14d, etc.)
+    var label = "+" + timeframes[t].toString() + " Days";
+    workspaceDataTable.push([label, devUpToday, devLoToday, devUpYest, devLoYest]);
+  }
+  
+  // 4. Safe Clear and Print Workspace Table to Sheet3 starting at Column G (G2)
+  var startDataRow = 2;
+  var startDataCol = 7; // Column G
+  var targetLastRow = targetSheet.getLastRow();
+  
+  if (targetLastRow >= startDataRow) {
+    targetSheet.getRange(startDataRow, startDataCol, targetLastRow - startDataRow + 1, 5).clearContent();
+  }
+  
+  // Write the fresh data matrix rows
+  targetSheet.getRange(startDataRow, startDataCol, workspaceDataTable.length, 5).setValues(workspaceDataTable);
+  
+  // 5. Build the Line Chart bound to the new forward-projected data matrix
+  var chartRange = targetSheet.getRange(startDataRow, startDataCol, workspaceDataTable.length, 5);
+  
+  var chartBuilder = targetSheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(chartRange)
+    .setOption('useFirstRowAsHeaders', true)
+    .setPosition(12, 2, 0, 0) // Places chart next to the data starting at Column M (Col 13)
+    .setOption('title', 'Risk Range Deviation Matrix (Forward Timeline Projections)')
+    .setOption('titleTextBoxStyle', { textStyle: { fontSize: 12, bold: true } })
+    .setOption('legend', { position: 'right', textStyle: { fontSize: 9 } })
+    .setOption('width', 850)
+    .setOption('height', 480)
+    .setOption('hAxis', {
+      title: 'Projected Target Horizon Date (Today + n Days)',
+      type: 'category',
+      textStyle: { fontSize: 9 }
+    })
+    .setOption('vAxis', {
+      title: 'Deviation Distance from Anchor Close ($)',
+      format: '$#,##0.00',
+      textStyle: { fontSize: 9 },
+      baseline: 0, 
+      baselineColor: '#000000'
+    });
+    
+  // 6. Layout Options: Solid lines for Today's calculation, Dashed lines for Yesterday's
+  var seriesOptions = {
+    0: { labelInLegend: 'Today Upper (Sell Target)', color: '#2AA63E', lineWidth: 2.5 },                     
+    1: { labelInLegend: 'Today Lower (Buy Target)',  color: '#E7180B', lineWidth: 2.5 },                     
+    2: { labelInLegend: 'Yesterday Upper Proj',      color: '#7BF1A8', lineWidth: 1.5, lineDashStyle: [4, 4] }, 
+    3: { labelInLegend: 'Yesterday Lower Proj',      color: '#E7180B', lineWidth: 1.5, lineDashStyle: [4, 4] }  
+  };
+  
+  chartBuilder.setOption('series', seriesOptions);
+  
+  // Insert the chart into Sheet3
+  targetSheet.insertChart(chartBuilder.build());
+ // SpreadsheetApp.getUi().alert("Forward Timeline Deviation Chart generated on Sheet3!");
+}
