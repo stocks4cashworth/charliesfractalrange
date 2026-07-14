@@ -2,13 +2,13 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   
   ui.createMenu('🚀 Hurst Calculations')
-      .addItem('hurst', 'calculateHurstMatrix')
-      .addItem('hurstbyperiod', 'calculateMasterFractalMatrix')
-      .addItem('Volatility', 'calculatePriceAndVolumeVolatility')
+      .addItem('hurst', 'generateDailyRollingFractalMatrix')
+      .addItem('hurst chart', 'generateSplitHurstTrendsCharts')
+      
       .addSeparator()
-      .addItem('createUnifiedChart', 'createUnifiedChart')
+      .addItem('Main Sheet Updates', 'generateMainSummaryDashboard')
       .addSeparator()
-      .addItem('populateRollingHurstColumns', 'populateRollingHurstColumns')
+      .addItem('forward chart', 'generateFractalDeviationChart')
       .addSeparator()
 
       .addToUi();
