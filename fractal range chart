@@ -1,0 +1,131 @@
+/**
+ * Generates a Line Chart tracking the Closing Price alongside the Upper and Lower 
+ * Fractal Risk Ranges for all periods over the last 15 active rows of Sheet1 and inserts it into Sheet2.
+ * Vertical axis is dynamically padded by +/- 10% of data extremes.
+ */
+function generateFractalRangesChart() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName("Sheet1");
+  var targetSheet = ss.getSheetByName("Sheet2");
+  
+  if (!sourceSheet) {
+    SpreadsheetApp.getUi().alert("Error: 'Sheet1' (source data) not found.");
+    return;
+  }
+  
+  // Create Sheet2 automatically if it doesn't exist yet
+  if (!targetSheet) {
+    targetSheet = ss.insertSheet("Sheet2");
+  }
+  
+  var lastRow = sourceSheet.getLastRow();
+  // Header is row 2, so we need at least 15 rows of data to map the trailing lookback properly
+  if (lastRow < 17) {
+    SpreadsheetApp.getUi().alert("Error: Not enough data rows in Sheet1 (need at least 15 rows of calculated data below the header).");
+    return;
+  }
+  
+  // 1. Clear any preexisting versions of this specific chart on Sheet2 to prevent stacking duplicates
+  var charts = targetSheet.getCharts();
+  for (var i = 0; i < charts.length; i++) {
+    var chartOptions = charts[i].getOptions();
+    if (chartOptions.get('title') === 'Multi-Period Fractal Risk Ranges (Past 15 Rows)') {
+      targetSheet.removeChart(charts[i]);
+    }
+  }
+  
+  // 2. Define our row boundaries for the trailing 15 rows from Sheet1
+  var startRow = lastRow - 14; 
+  var numRows = 15;
+  
+  // X-Axis Domain: Date Column (Column A / 1) from Sheet1
+  var dateRange = sourceSheet.getRange(startRow, 1, numRows, 1);
+  
+  // 3. Include Column E (5) for Closing Prices along with the Upper & Lower range column indices
+  var closeColumn = 5; 
+  var rangeColumns = [13, 14, 19, 20, 25, 26, 31, 32, 37, 38, 43, 44];
+  var allTargetColumns = [closeColumn].concat(rangeColumns);
+  
+  // 4. Extract raw values across all target columns for the 15-day slice to calculate min/max bounding box
+  var allExtremes = [];
+  allTargetColumns.forEach(function(colIndex) {
+    var values = sourceSheet.getRange(startRow, colIndex, numRows, 1).getValues().flat();
+    values.forEach(function(val) {
+      var parsed = parseFloat(val);
+      if (!isNaN(parsed)) {
+        allExtremes.push(parsed);
+      }
+    });
+  });
+  
+  if (allExtremes.length === 0) {
+    SpreadsheetApp.getUi().alert("Error: Could not locate numeric range data in the tracking columns to generate a chart.");
+    return;
+  }
+  
+  var absoluteMax = Math.max(...allExtremes);
+  var absoluteMin = Math.min(...allExtremes);
+  
+  // Apply a clean mathematical +/- 10% dynamic threshold allocation
+  var yAxisMax = absoluteMax * 1.10;
+  var yAxisMin = absoluteMin * 0.90;
+  
+  // 5. Construct the chart builder and bind the source ranges from Sheet1
+  var chartBuilder = targetSheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(dateRange)
+    .setOption('useFirstRowAsHeaders', false)
+    .setOption('title', 'Multi-Period Fractal Risk Ranges (Past 15 Rows)')
+    .setOption('titleTextBoxStyle', { textStyle: { fontSize: 12, bold: true } })
+    .setOption('legend', { position: 'right', textStyle: { fontSize: 9 } })
+    .setOption('curveType', 'function') // Smooth curves across lookback transitions
+    .setOption('width', 950)
+    .setOption('height', 550)
+    .setOption('hAxis', {
+      title: 'Date',
+      format: 'MM/dd',
+      textStyle: { fontSize: 9 }
+    })
+    .setOption('vAxis', {
+      title: 'Price ($)',
+      format: '$#,##0.00',
+      textStyle: { fontSize: 9 },
+      viewWindow: {
+        min: yAxisMin,
+        max: yAxisMax
+      }
+    });
+    
+  // Sequentially link data streams into the builder framework (Close Price is added first, index 0)
+  allTargetColumns.forEach(function(colIndex) {
+    var rangeSlice = sourceSheet.getRange(startRow, colIndex, numRows, 1);
+    chartBuilder.addRange(rangeSlice);
+  });
+  
+  // 6. Color palette configurations (Series 0 is the Close Price; all bands are shifted down by 1)
+  var seriesOptions = {
+    0: { labelInLegend: 'Closing Price', color: '#000000', lineWidth: 3.5 }, // Thick Anchor Line
+    
+    11: { labelInLegend: '90d Upper', color: '#032E15', lineWidth: 2, lineDashStyle: [4, 4] },
+    9: { labelInLegend: '60d Upper', color: '#016630', lineWidth: 1.5 },
+    7: { labelInLegend: '30d Upper', color: '#034F3B', lineWidth: 1.5 },
+    5: { labelInLegend: '21d Upper', color: '#2D9966', lineWidth: 1.5 },
+    3: { labelInLegend: '14d Upper', color: '#05DF72', lineWidth: 1.5 },
+    1: { labelInLegend: '7d Upper', color: '#A4F4CF', lineWidth: 1.5 },
+
+    2: { labelInLegend: '7d Lower', color: '#F6CFFF', lineWidth: 1.5 },
+    4: { labelInLegend: '14d Lower', color: '#FB64B6', lineWidth: 1.5 },
+    6: { labelInLegend: '21d Lower', color: '#E12AFB', lineWidth: 1.5 },
+    8: { labelInLegend: '30d Lower', color: '#EC253F', lineWidth: 1.5 },
+    10: { labelInLegend: '60d Lower', color: '#9F0712', lineWidth: 1.5 },
+    12: { labelInLegend: '90d Lower', color: '#8B0836', lineWidth: 2, lineDashStyle: [4, 4] }
+  };
+  
+  chartBuilder.setOption('series', seriesOptions);
+  
+  // 7. Place chart directly at row 2, column B (cell B2) inside Sheet2 
+  chartBuilder.setPosition(2, 2, 0, 0);
+  
+  targetSheet.insertChart(chartBuilder.build());
+  //SpreadsheetApp.getUi().alert("Fractal Range chart updated on Sheet2 with Closing Prices included!");
+}
