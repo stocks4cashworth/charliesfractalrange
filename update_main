@@ -1,0 +1,281 @@
+/**
+ * Generates a real-time summary matrix dashboard on sheet 'Main' starting at Row 5.
+ * Interleaves alternating value rows and 10-day historical trend sparklines.
+ * Legend is cleanly isolated at cell P1.
+ */
+function generateMainSummaryDashboard() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName("Sheet1");
+  var mainSheet = ss.getSheetByName("Main");
+  
+  if (!sourceSheet) {
+    SpreadsheetApp.getUi().alert("Error: 'Sheet1' data source sheet not found.");
+    return;
+  }
+  
+  if (!mainSheet) {
+    mainSheet = ss.insertSheet("Main");
+  }
+  
+  // 1. Locate the true last data row index in Sheet1
+  var rawLastRow = sourceSheet.getLastRow();
+  if (rawLastRow <= 2) {
+    SpreadsheetApp.getUi().alert("Error: No data available in Sheet1 to summarize.");
+    return;
+  }
+  
+  var checkValues = sourceSheet.getRange(1, 9, rawLastRow, 1).getValues().flat();
+  var lastValidRowIndex = rawLastRow;
+  for (var k = rawLastRow - 1; k >= 0; k--) {
+    if (checkValues[k] !== "" && !isNaN(checkValues[k]) && checkValues[k] !== null) {
+      lastValidRowIndex = k + 1;
+      break;
+    }
+  }
+  
+  // Define row boundaries for the 10-day trend window lookback
+  var startTrendRow = Math.max(3, lastValidRowIndex - 9); // Data rows start on row 3
+  
+  // 2. Map structural source column coordinates from Sheet1 for each horizon block
+  var timeframes = [7, 14, 21, 30, 60, 90];
+  var columnOffsets = [9, 15, 21, 27, 33, 39]; 
+  
+  // 3. Setup interwoven label headers for Column A
+  var sideLabels = [
+    ["Price Hurst"],
+    ["  10d Trend"],
+    ["Volume Hurst"],
+    ["  10d Trend"],
+    ["Scaling Factor"],
+    ["  10d Trend"],
+    ["Volatility (σ)"],
+    ["  10d Trend"],
+    ["Upper Fractal Range"],
+    ["  10d Trend"],
+    ["Lower Fractal Range"],
+    ["  10d Trend"]
+  ];
+  
+  var topHeaders = [["7d Period", "14d Period", "21d Period", "30d Period", "60d Period", "90d Period"]];
+  
+  // 4. Initialize separate grids for values and sparkline formulas to print cleanly
+  var finalOutputGrid = [];
+  for (var r = 0; r < 12; r++) {
+    finalOutputGrid.push(new Array(timeframes.length));
+  }
+  
+  // 5. Query Sheet1 and populate alternating rows (Values vs. Sparkline Formula strings)
+  for (var t = 0; t < timeframes.length; t++) {
+    var startCol = columnOffsets[t];
+    var latestValues = sourceSheet.getRange(lastValidRowIndex, startCol, 1, 6).getValues()[0];
+    
+    for (var m = 0; m < 6; m++) {
+      var valueRowIdx = m * 2;
+      var sparkRowIdx = valueRowIdx + 1;
+      
+      // Assign the raw scalar value to its row position
+      finalOutputGrid[valueRowIdx][t] = latestValues[m];
+      
+      // Calculate specific column letter corresponding to the metric index
+      var currentColumnLetter = getColumnLetter(startCol + m);
+      
+      // Build dynamic 10-day historical cell tracking range formula
+      finalOutputGrid[sparkRowIdx][t] = "=SPARKLINE(Sheet1!" + currentColumnLetter + startTrendRow + ":" + currentColumnLetter + lastValidRowIndex + ")";
+    }
+  }
+  
+  // 6. Clear and format workspace destination areas on sheet 'Main'
+  // Clear expanded main grid area (A5:G17) and Legend area (P1:R6) cleanly
+  mainSheet.getRange("A5:G17").clearContent().clearFormat();
+  mainSheet.getRange("P1:R6").clearContent().clearFormat();
+  mainSheet.clearConditionalFormatRules();
+  
+  // Write the top timeframe headers to Row 5
+  mainSheet.getRange(5, 2, 1, 6).setValues(topHeaders).setFontWeight("bold").setBackground("#f3f3f3").setHorizontalAlignment("center");
+  
+  // Write interwoven labels to Column A (Rows 6 to 17)
+  mainSheet.getRange(6, 1, 12, 1).setValues(sideLabels).setFontWeight("bold").setBackground("#fafafa");
+  
+  // Write complete calculation block values and formulas (Rows 6 to 17, Columns B to G)
+  var outputZone = mainSheet.getRange(6, 2, 12, 6);
+  outputZone.setValues(finalOutputGrid).setHorizontalAlignment("right");
+  
+  // 7. Apply distinct presentation formats specifically to value rows (skipping sparklines)
+  mainSheet.getRange("B6:G6").setNumberFormat("0.00");   // Price Hurst
+  mainSheet.getRange("B8:G8").setNumberFormat("0.00");   // Vol Hurst
+  mainSheet.getRange("B10:G10").setNumberFormat("0.00"); // Scaling Factor
+  mainSheet.getRange("B12:G12").setNumberFormat("0.0000"); // Volatility (σ)
+  mainSheet.getRange("B14:G14").setNumberFormat("$#,##0.00"); // Upper Range
+  mainSheet.getRange("B16:G16").setNumberFormat("$#,##0.00"); // Lower Range
+  
+  // Shade sparkline rows subtly to separate them visually from values
+  var sparklineRows = [7, 9, 11, 13, 15, 17];
+  sparklineRows.forEach(function(row) {
+    mainSheet.getRange(row, 2, 1, 6).setBackground("#fdfdfd");
+  });
+  
+  // ==========================================
+  // REGIME GUIDE LEGEND BLOCK (P1:R6)
+  // ==========================================
+  mainSheet.getRange("P1").setValue("HURST REGIME GUIDE").setFontWeight("bold").setFontSize(10);
+  mainSheet.getRange("P1:R1").merge().setHorizontalAlignment("center").setBackground("#e0e0e0");
+  
+  var legendData = [
+    ["0.60 to 1.00", "Strongly Persistent", "High conviction trend."],
+    ["0.53 to 0.59", "Weakly Persistent", "Emerging trend or 'Lazy' move."],
+    ["0.47 to 0.53", "The Noise Box", "Random Walk / Efficiency."],
+    ["0.40 to 0.46", "Weakly Reverting", "Choppy, but biased to the mean."],
+    ["0.00 to 0.39", "Strongly Reverting", "Price is 'Coiled.'"]
+  ];
+  
+  mainSheet.getRange(2, 16, 5, 3).setValues(legendData);
+  mainSheet.getRange("P2:P6").setFontWeight("bold").setHorizontalAlignment("center");
+  
+  // Color-code the background blocks of the legend
+  mainSheet.getRange("P2:R2").setBackground("#D9C3F0"); 
+  mainSheet.getRange("P3:R3").setBackground("#EFE5F9"); 
+  mainSheet.getRange("P4:R4").setBackground("#E0E0E0"); 
+  mainSheet.getRange("P5:R5").setBackground("#FFE0B2"); 
+  mainSheet.getRange("P6:R6").setBackground("#FFCC80"); 
+  
+  // ==========================================
+  // CONDITIONAL FORMATTING RULES
+  // ==========================================
+  // Direct rules exclusively to Row 6 (Price Hurst) and Row 8 (Volume Hurst)
+  var priceHurstRange = mainSheet.getRange("B6:G6");
+  var volumeHurstRange = mainSheet.getRange("B8:G8");
+  var rules = mainSheet.getConditionalFormatRules();
+  
+  var formattingTiers = [
+    { min: 0.60, max: 1.00, bg: "#D9C3F0" }, 
+    { min: 0.53, max: 0.60, bg: "#EFE5F9" }, 
+    { min: 0.47, max: 0.53, bg: "#E0E0E0" }, 
+    { min: 0.40, max: 0.47, bg: "#FFE0B2" }, 
+    { min: 0.00, max: 0.40, bg: "#FFCC80" }  
+  ];
+  
+  formattingTiers.forEach(function(tier) {
+    var rule = SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberBetween(tier.min, tier.max)
+      .setBackground(tier.bg)
+      .setFontColor("#1f1f1f")
+      .setRanges([priceHurstRange, volumeHurstRange])
+      .build();
+    rules.push(rule);
+  });
+  
+  mainSheet.setConditionalFormatRules(rules);
+  
+ generateMainPriceChart()
+}
+
+/**
+ * HELPER: Formats a 1-based index column index number into standard spreadsheet character coordinates.
+ */
+function getColumnLetter(colIndex) {
+  var letter = "";
+  while (colIndex > 0) {
+    var temp = (colIndex - 1) % 26;
+    letter = String.fromCharCode(65 + temp) + letter;
+    colIndex = Math.floor((colIndex - temp) / 26);
+  }
+  return letter;
+}
+
+
+
+/**
+ * Generates a historical Closing Price line chart and inserts it 
+ * into the 'Main' sheet starting at cell A20.
+ */
+function generateMainPriceChart() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName("Sheet1");
+  var mainSheet = ss.getSheetByName("Main");
+  
+  if (!sourceSheet || !mainSheet) {
+    SpreadsheetApp.getUi().alert("Error: Make sure both 'Sheet1' and 'Main' sheets exist.");
+    return;
+  }
+  
+  var lastRow = sourceSheet.getLastRow();
+  // Header is row 2, so data rows start on row 3
+  if (lastRow <= 2) {
+    SpreadsheetApp.getUi().alert("Error: Not enough data in Sheet1 to generate a price chart.");
+    return;
+  }
+  
+  // 1. Clear any preexisting versions of this specific chart on the Main sheet to prevent stacking duplicates
+  var charts = mainSheet.getCharts();
+  for (var i = 0; i < charts.length; i++) {
+    var chartOptions = charts[i].getOptions();
+    if (chartOptions.get('title') === 'Historical Closing Price Performance') {
+      mainSheet.removeChart(charts[i]);
+    }
+  }
+  
+  var totalDataRows = lastRow - 2; // Rows from row 3 down to the bottom
+  
+  // 2. Define data ranges from Sheet1
+  // X-Axis Domain: Date Column (Column A / 1) starting from row 3
+  var dateRange = sourceSheet.getRange(3, 1, totalDataRows, 1);
+  // Y-Axis Series: Close Price Column (Column E / 5) starting from row 3
+  var priceRange = sourceSheet.getRange(3, 5, totalDataRows, 1);
+  
+  // 3. Dynamically calculate the vertical axis min/max boundaries with a 5% padding box
+  var priceValues = priceRange.getValues().flat().filter(function(val) {
+    return typeof val === 'number' && !isNaN(val);
+  });
+  
+  if (priceValues.length === 0) {
+    SpreadsheetApp.getUi().alert("Error: Could not locate numeric closing prices to chart.");
+    return;
+  }
+  
+  var maxPrice = Math.max(...priceValues);
+  var minPrice = Math.min(...priceValues);
+  var priceSpread = maxPrice - minPrice;
+  
+  var yAxisMin = Math.max(0, (minPrice * 0.95)); // 5% padding below, clamped at 0
+  var yAxisMax = (maxPrice * 1.05);             // 5% padding above
+  
+  // 4. Construct and style the continuous line chart
+  var chartBuilder = mainSheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(dateRange)
+    .addRange(priceRange)
+    .setOption('useFirstRowAsHeaders', false) // Slicing raw data directly from row 3
+    .setOption('title', 'Historical Closing Price Performance')
+    .setOption('titleTextBoxStyle', {
+      textStyle: {
+        fontSize: 14,
+        bold: true,
+        color: '#1f1f1f'
+      }
+    })
+    .setOption('legend', { position: 'none' }) // Hide legend since there's only a single series line
+    .setOption('colors', ['#1a73e8']) // Professional asset blue tracking line
+    .setOption('width', 750)
+    .setOption('height', 400)
+    .setOption('curveType', 'function') // Smooth out price transitions cleanly
+    .setOption('hAxis', {
+      title: 'Timeline',
+      format: 'yyyy-MM-dd',
+      textStyle: { fontSize: 9 },
+      gridlines: { count: 8 }
+    })
+    .setOption('vAxis', {
+      title: 'Closing Price ($)',
+      format: '$#,##0.00',
+      textStyle: { fontSize: 9 },
+      viewWindow: {
+        min: yAxisMin,
+        max: yAxisMax
+      }
+    });
+    
+  // 5. Place the fresh chart on the Main sheet precisely starting at Row 20, Column A (Column 1)
+  chartBuilder.setPosition(20, 1, 0, 0);
+  
+  mainSheet.insertChart(chartBuilder.build());
+}
