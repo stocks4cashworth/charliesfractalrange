@@ -1,0 +1,136 @@
+/**
+ * Generates two separate Line Charts on Sheet3:
+ * 1. Price Hurst trends for all periods over the last 5 active rows.
+ * 2. Volume Hurst trends for all periods over the last 5 active rows.
+ * Uses consistent color matching per lookback period across both charts.
+ */
+function generateSplitHurstTrendsCharts() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName("Sheet1");
+  var targetSheet = ss.getSheetByName("Sheet3");
+  
+  if (!sourceSheet) {
+    SpreadsheetApp.getUi().alert("Error: 'Sheet1' (source data) not found.");
+    return;
+  }
+  
+  // Create Sheet3 automatically if it doesn't exist yet
+  if (!targetSheet) {
+    targetSheet = ss.insertSheet("Sheet3");
+  }
+  
+  var lastRow = sourceSheet.getLastRow();
+  // Header is row 2, so we need at least 5 rows of data below it
+  if (lastRow < 7) {
+    SpreadsheetApp.getUi().alert("Error: Not enough data rows in Sheet1 (need at least 5 rows of calculated data below the header).");
+    return;
+  }
+  
+  // 1. Clear any preexisting versions of these specific charts on Sheet3 to avoid duplication
+  var charts = targetSheet.getCharts();
+  for (var i = 0; i < charts.length; i++) {
+    var chartOptions = charts[i].getOptions();
+    var title = chartOptions.get('title');
+    if (title === 'Multi-Period Price Hurst Trends (Past 5 Rows)' || 
+        title === 'Multi-Period Volume Hurst Trends (Past 5 Rows)') {
+      targetSheet.removeChart(charts[i]);
+    }
+  }
+  
+  // 2. Define our row boundaries for the trailing 5 rows from Sheet1
+  var startRow = lastRow - 4; 
+  var numRows = 5;
+  
+  // X-Axis Domain: Date Column (Column A / 1) from Sheet1
+  var dateRange = sourceSheet.getRange(startRow, 1, numRows, 1);
+  
+  // Column indices from Sheet1 based on your matrix layout starting at Col I (9):
+  var priceColumns = [9, 15, 21, 27, 33, 39]; // 7d, 14d, 21d, 30d, 60d, 90d Price Hurst
+  var volumeColumns = [10, 16, 22, 28, 34, 40]; // 7d, 14d, 21d, 30d, 60d, 90d Volume Hurst
+  
+  // 3. Define the shared color palette mapping for each period index (0 to 5)
+  var colorPalette = ['#3498db', '#2ecc71', '#1abc9c', '#e67e22', '#e74c3c', '#9b59b6'];
+  // Index:             0 (7d),    1 (14d),   2 (21d),   3 (30d),   4 (60d),   5 (90d)
+  
+  // ==========================================
+  // CHART 1: PRICE HURST TRENDS
+  // ==========================================
+  var priceChartBuilder = targetSheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(dateRange)
+    .setOption('useFirstRowAsHeaders', false)
+    .setOption('title', 'Multi-Period Price Hurst Trends (Past 5 Rows)')
+    .setOption('titleTextBoxStyle', { textStyle: { fontSize: 12, bold: true } })
+    .setOption('legend', { position: 'bottom', textStyle: { fontSize: 9 } })
+    .setOption('curveType', 'function')
+    .setOption('width', 800)
+    .setOption('height', 500)
+    .setOption('hAxis', { title: 'Date', format: 'MM/dd', textStyle: { fontSize: 9 } })
+    .setOption('vAxis', {
+      title: 'Price Hurst (H)',
+      format: '0.00',
+      textStyle: { fontSize: 9 },
+      viewWindow: { min: 0.0, max: 1.0 },
+      gridlines: { count: 6 }
+    });
+    
+  priceColumns.forEach(function(colIndex) {
+    priceChartBuilder.addRange(sourceSheet.getRange(startRow, colIndex, numRows, 1));
+  });
+  
+  var priceSeriesOptions = {
+    0: { labelInLegend: '7d Price H',  color: colorPalette[0], lineWidth: 2 },
+    1: { labelInLegend: '14d Price H', color: colorPalette[1], lineWidth: 2 },
+    2: { labelInLegend: '21d Price H', color: colorPalette[2], lineWidth: 2 },
+    3: { labelInLegend: '30d Price H', color: colorPalette[3], lineWidth: 2 },
+    4: { labelInLegend: '60d Price H', color: colorPalette[4], lineWidth: 2 },
+    5: { labelInLegend: '90d Price H', color: colorPalette[5], lineWidth: 2 }
+  };
+  priceChartBuilder.setOption('series', priceSeriesOptions);
+  
+  // Position the Price Chart at B2
+  priceChartBuilder.setPosition(2, 1, 0, 0);
+  targetSheet.insertChart(priceChartBuilder.build());
+  
+  // ==========================================
+  // CHART 2: VOLUME HURST TRENDS
+  // ==========================================
+  var volumeChartBuilder = targetSheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(dateRange)
+    .setOption('useFirstRowAsHeaders', false)
+    .setOption('title', 'Multi-Period Volume Hurst Trends (Past 5 Rows)')
+    .setOption('titleTextBoxStyle', { textStyle: { fontSize: 12, bold: true } })
+    .setOption('legend', { position: 'bottom', textStyle: { fontSize: 9 } })
+    .setOption('curveType', 'function')
+    .setOption('width', 800)
+    .setOption('height', 500)
+    .setOption('hAxis', { title: 'Date', format: 'MM/dd', textStyle: { fontSize: 9 } })
+    .setOption('vAxis', {
+      title: 'Volume Hurst (H)',
+      format: '0.00',
+      textStyle: { fontSize: 9 },
+      viewWindow: { min: 0.0, max: 1.0 },
+      gridlines: { count: 6 }
+    });
+    
+  volumeColumns.forEach(function(colIndex) {
+    volumeChartBuilder.addRange(sourceSheet.getRange(startRow, colIndex, numRows, 1));
+  });
+  
+  var volumeSeriesOptions = {
+    0: { labelInLegend: '7d Vol H',  color: colorPalette[0], lineWidth: 2 },
+    1: { labelInLegend: '14d Vol H', color: colorPalette[1], lineWidth: 2 },
+    2: { labelInLegend: '21d Vol H', color: colorPalette[2], lineWidth: 2 },
+    3: { labelInLegend: '30d Vol H', color: colorPalette[3], lineWidth: 2 },
+    4: { labelInLegend: '60d Vol H', color: colorPalette[4], lineWidth: 2 },
+    5: { labelInLegend: '90d Vol H', color: colorPalette[5], lineWidth: 2 }
+  };
+  volumeChartBuilder.setOption('series', volumeSeriesOptions);
+  
+  // Position the Volume Chart at B24 (leaving a comfortable gap below the first chart)
+  volumeChartBuilder.setPosition(2, 9, 0, 0);
+  targetSheet.insertChart(volumeChartBuilder.build());
+  
+  //SpreadsheetApp.getUi().alert("Both split Price and Volume Hurst trend charts successfully generated on Sheet3!");
+}
