@@ -1,0 +1,331 @@
+/**
+ * Quantitative TRADE & TREND Fractal Engine
+ * - TRADE: Short-term (8 - 21 days dynamically Hurst-scaled EMA)
+ * - TREND: Medium-term (63-day Volume-Weighted Moving Average / VWMA)
+ */
+function generateTradeAndTrendModel() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const srcSheet = ss.getSheetByName("Sheet1");
+  
+  if (!srcSheet) {
+    SpreadsheetApp.getUi().alert("Sheet1 not found.");
+    return;
+  }
+  
+  const ticker = srcSheet.getRange("A1").getValue();
+  const lastRow = srcSheet.getLastRow();
+  
+  // Need at least 90 days for 63-day VWMA + Hurst window
+  if (lastRow < 95) {
+    SpreadsheetApp.getUi().alert("Need at least 95 trading days in Sheet1 for stable 63-day TREND and Hurst calculations.");
+    return;
+  }
+  
+  // Cols: A:Date, B:Open, C:High, D:Low, E:Close, F:Volume
+  const rawData = srcSheet.getRange(3, 1, lastRow - 2, 6).getValues();
+  const data = rawData.filter(r => r[0] instanceof Date && !isNaN(r[4]) && r[4] !== "" && !isNaN(r[5]));
+  const n = data.length;
+
+  if (n < 80) {
+    SpreadsheetApp.getUi().alert("Insufficient valid trading rows.");
+    return;
+  }
+
+  // --- Step 1: Calculate Log Returns ---
+  let logReturns = [];
+  for (let i = 1; i < n; i++) {
+    logReturns.push(Math.log(data[i][4] / data[i - 1][4]));
+  }
+
+  const hurstLookback = 64;
+  const trendWindow = 63; // 3-month institutional trend anchor
+  const startIndex = Math.max(hurstLookback, trendWindow);
+
+  let historicalLog = [];
+
+  for (let i = startIndex; i < n; i++) {
+    const date = data[i][0];
+    const close = parseFloat(data[i][4]);
+    const volume = parseFloat(data[i][5]);
+
+    // 1. Hurst Exponent (64-day returns window)
+    const returnsWindow = logReturns.slice(i - hurstLookback, i);
+    const H = computeHurst(returnsWindow);
+
+    // 2. Dynamic TRADE Lookback (scales 8 - 21 days based on H)
+    const tradeLookback = Math.round(Math.max(8, Math.min(21, 8 + (H - 0.3) * 26)));
+    const tradeLine = calculateEMA(data, i, tradeLookback);
+    const tradeState = close >= tradeLine ? "BULLISH" : "BEARISH";
+
+    // 3. 63-Day TREND Anchor (VWMA)
+    let sumPV = 0;
+    let sumV = 0;
+    for (let t = i - trendWindow + 1; t <= i; t++) {
+      const c = parseFloat(data[t][4]);
+      const v = parseFloat(data[t][5]);
+      sumPV += (c * v);
+      sumV += v;
+    }
+    const trendLine = sumV > 0 ? (sumPV / sumV) : close;
+    const trendState = close >= trendLine ? "BULLISH" : "BEARISH";
+
+    // 4. Combined Market Regime
+    let regime = "";
+    if (tradeState === "BULLISH" && trendState === "BULLISH") regime = "BULL TREND (LONG)";
+    else if (tradeState === "BEARISH" && trendState === "BULLISH") regime = "BULL PULLBACK (BUY DIP)";
+    else if (tradeState === "BULLISH" && trendState === "BEARISH") regime = "BEAR BOUNCE (FADE/SELL)";
+    else regime = "BEAR TREND (SHORT/DEFENSE)";
+
+
+
+
+
+
+
+    // 5. Dynamic Volatility & Risk Range
+    const recent21Returns = logReturns.slice(i - 21, i);
+    const meanR = recent21Returns.reduce((a, b) => a + b, 0) / 21;
+    const variance = recent21Returns.reduce((s, r) => s + Math.pow(r - meanR, 2), 0) / 20;
+    const dailyVol = Math.sqrt(variance);
+
+    let volSum = 0;
+    for (let v = i - 20; v < i; v++) volSum += parseFloat(data[v][5]);
+    const avgVol20 = volSum / 20;
+    const rvol = avgVol20 > 0 ? (volume / avgVol20) : 1.0;
+    const volScalar = Math.sqrt(Math.max(0.4, Math.min(rvol, 2.5)));
+
+    const hurstMultiplier = 1.65 * (1 + 1.8 * (H - 0.50));
+    const priceVsTrend = (close - trendLine) / trendLine;
+    const skew = Math.max(-0.25, Math.min(priceVsTrend * (H / 0.5), 0.25));
+
+    const expectedMove = close * dailyVol * hurstMultiplier * volScalar;
+    const rangeLow = close - (expectedMove * (1 - skew));
+    const rangeHigh = close + (expectedMove * (1 + skew));
+
+    const spread = rangeHigh - rangeLow;
+    const posPct = spread > 0 ? (close - rangeLow) / spread : 0.5;
+
+    historicalLog.push({
+      date: date,
+      close: close,
+      tradeLine: tradeLine,
+      tradeLookback: tradeLookback,
+      tradeState: tradeState,
+      trendLine: trendLine,
+      trendState: trendState,
+      regime: regime,
+      rangeLow: rangeLow,
+      rangeHigh: rangeHigh,
+      posPct: posPct,
+      hurst: H,
+      rvol: rvol
+    });
+  }
+
+ 
+// --- Step 4: Write to 'Fractal Risk Range' Sheet ---
+  let outSheet = ss.getSheetByName("Fractal Risk Range");
+  if (!outSheet) {
+    outSheet = ss.insertSheet("Fractal Risk Range");
+  } else {
+    outSheet.clear();
+  }
+
+  const latest = historicalLog[historicalLog.length - 1];
+
+  // 1. Header Banner (Row 1)
+  outSheet.getRange("A1:F1").setValues([["TICKER", ticker, "AS OF", latest.date, "REGIME", latest.regime]])
+    .setFontWeight("bold")
+    .setBackground("#090d16")
+    .setFontColor("#ffffff");
+
+  // 2. Sub-header Row 2: Company Name (A2) & Live Current Price (C2:D2)
+  outSheet.getRange("A2").setFormula('=GOOGLEFINANCE(B1, "name")')
+    .setFontWeight("bold")
+    .setFontSize(11)
+    .setFontColor("#334155");
+
+
+  outSheet.getRange("D2").setFormula('=GOOGLEFINANCE(B1)')
+    .setFontWeight("bold")
+    .setFontSize(11)
+    .setNumberFormat("$#,##0.00")
+    .setFontColor("#0f172a");
+
+  outSheet.getRange("n11").setFormula('=GOOGLEFINANCE(B1)')
+    .setNumberFormat("$#,##0.00")
+
+  // 3. Summary Dashboard Cards (Rows 4-7)
+  const cards = [
+    ["Calc Price", latest.close, "TRADE Line (" + latest.tradeLookback + "D)", latest.tradeLine, "TRADE State", latest.tradeState],
+    ["Risk Range Low", latest.rangeLow, "TREND Line (63D)", latest.trendLine, "TREND State", latest.trendState],
+    ["Risk Range High", latest.rangeHigh, "Relative Volume", latest.rvol, "Setup Call", latest.regime],
+    ["Position in Range", latest.posPct, "Hurst Exponent", latest.hurst, "Execution Bias", 
+      latest.posPct > 0.85 ? "AT TOP OF RANGE (TRIM/SHORT)" :
+      latest.posPct < 0.15 ? "AT BOTTOM OF RANGE (BUY/COVER)" : "MIDDLE OF RANGE"]
+  ];
+
+  outSheet.getRange(4, 1, 4, 6).setValues(cards).setFontWeight("bold");
+  outSheet.getRange("A4:A7").setBackground("#f1f5f9").setFontWeight("normal");
+  outSheet.getRange("C4:C7").setBackground("#f1f5f9").setFontWeight("normal");
+  outSheet.getRange("E4:E7").setBackground("#f1f5f9").setFontWeight("normal");
+
+  // Format Summary Cards
+  outSheet.getRange("B4:B6").setNumberFormat("$#,##0.00");
+  outSheet.getRange("D4:D5").setNumberFormat("$#,##0.00");
+  outSheet.getRange("D6").setNumberFormat("0.00x");
+  outSheet.getRange("B7").setNumberFormat("0.0%");
+  outSheet.getRange("D7").setNumberFormat("0.000");
+
+  const tradeCell = outSheet.getRange("F4");
+  tradeCell.setBackground(latest.tradeState === "BULLISH" ? "#dcfce7" : "#fee2e2");
+  tradeCell.setFontColor(latest.tradeState === "BULLISH" ? "#15803d" : "#b91c1c");
+
+  const trendCell = outSheet.getRange("F5");
+  trendCell.setBackground(latest.trendState === "BULLISH" ? "#dcfce7" : "#fee2e2");
+  trendCell.setFontColor(latest.trendState === "BULLISH" ? "#15803d" : "#b91c1c");
+
+  // 4. Historical Log Table (Row 10)
+  const startRow = 10; // Explicitly defined before use
+  const headers = [
+    ["Date", "Close", "Range Low", "Range High", "% in Range", "TRADE Line", "TRADE", "TREND Line", "TREND", "Regime", "Hurst (H)", "Range Spread", "7D Range Structure"]
+  ];
+
+  outSheet.getRange(startRow, 1, 1, 13).setValues(headers)
+    .setFontWeight("bold")
+    .setBackground("#1e293b")
+    .setFontColor("#ffffff");
+
+  // Map rows in reverse chronological order (newest first)
+  const reversedHistory = historicalLog.slice().reverse();
+  const rows = reversedHistory.map((r, idx, arr) => {
+    const spread = r.rangeHigh - r.rangeLow;
+    
+    let structure = "N/A";
+    if (idx + 7 < arr.length) {
+      const past7 = arr.slice(idx + 1, idx + 8);
+      const maxHigh = Math.max(...past7.map(p => p.rangeHigh));
+      const minHigh = Math.min(...past7.map(p => p.rangeHigh));
+      const minLow = Math.min(...past7.map(p => p.rangeLow));
+      const maxLow = Math.max(...past7.map(p => p.rangeLow));
+
+      const minspread = Math.min(...past7.map(p => p.rangeHigh-p.rangeLow));
+      const maxspread = Math.max(...past7.map(p => p.rangeHigh-p.rangeLow));
+
+
+      const highStatus = r.rangeHigh > maxHigh ? "Higher High" : (r.rangeHigh < minHigh ? "Lower High" : "");
+      const lowStatus = r.rangeLow > maxLow ? "Higher Low" : (r.rangeLow < minLow ? "Lower Low" : "");
+      
+      const spreadStatus = spread > maxspread ? "larger range" : ( spread < minspread ? "smaller range":"" ) ;
+
+      structure = highStatus + " / " + lowStatus + " / "+ spreadStatus;
+    }
+
+    return [
+      r.date,
+      r.close,
+      r.rangeLow,
+      r.rangeHigh,
+      r.posPct,
+      r.tradeLine,
+      r.tradeState,
+      r.trendLine,
+      r.trendState,
+      r.regime,
+      r.hurst,
+      spread,
+      structure
+    ];
+  });
+
+  outSheet.getRange(startRow + 1, 1, rows.length, 13).setValues(rows);
+
+  // Column Formatting
+  outSheet.getRange(startRow + 1, 1, rows.length, 1).setNumberFormat("MM-dd");
+  outSheet.getRange(startRow + 1, 2, rows.length, 3).setNumberFormat("$#,##0.00");
+  outSheet.getRange(startRow + 1, 5, rows.length, 1).setNumberFormat("0.0%");
+  outSheet.getRange(startRow + 1, 6, rows.length, 1).setNumberFormat("$#,##0.00");
+  outSheet.getRange(startRow + 1, 8, rows.length, 1).setNumberFormat("$#,##0.00");
+  outSheet.getRange(startRow + 1, 11, rows.length, 1).setNumberFormat("0.000");
+  outSheet.getRange(startRow + 1, 12, rows.length, 1).setNumberFormat("$#,##0.00");
+
+  outSheet.autoResizeColumns(1, 13);
+
+
+// add sparklines
+outSheet.getRange("C9").setFormula('=SPARKLINE(C11:C18)')
+outSheet.getRange("d9").setFormula('=SPARKLINE(d11:d18)')
+outSheet.getRange("f9").setFormula('=SPARKLINE(f11:f18)')
+outSheet.getRange("h9").setFormula('=SPARKLINE(h11:h18)')
+
+
+
+
+  //SpreadsheetApp.getUi().alert("TRADE, TREND, and Fractal Risk Range generated successfully!");
+
+  createRiskRangeChart();
+}
+
+/**
+ * Multi-Scale Rescaled Range (R/S) Hurst Exponent
+ */
+function computeHurst(series) {
+  const subSizes = [8, 16, 32, series.length];
+  let logSizes = [];
+  let logRS = [];
+
+  subSizes.forEach(size => {
+    const numChunks = Math.floor(series.length / size);
+    let rsTotal = 0;
+    let validChunks = 0;
+
+    for (let c = 0; c < numChunks; c++) {
+      const chunk = series.slice(c * size, (c + 1) * size);
+      const mean = chunk.reduce((a, b) => a + b, 0) / size;
+      const variance = chunk.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (size - 1);
+      const s = Math.sqrt(variance);
+      if (s === 0) continue;
+
+      let cumulative = 0;
+      let minDev = 0;
+      let maxDev = 0;
+      for (let i = 0; i < size; i++) {
+        cumulative += (chunk[i] - mean);
+        if (cumulative > maxDev) maxDev = cumulative;
+        if (cumulative < minDev) minDev = cumulative;
+      }
+      rsTotal += ((maxDev - minDev) / s);
+      validChunks++;
+    }
+
+    if (validChunks > 0) {
+      logSizes.push(Math.log(size));
+      logRS.push(Math.log(rsTotal / validChunks));
+    }
+  });
+
+  const n = logSizes.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += logSizes[i];
+    sumY += logRS[i];
+    sumXY += logSizes[i] * logRS[i];
+    sumXX += logSizes[i] * logSizes[i];
+  }
+  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  return Math.max(0.25, Math.min(slope, 0.85));
+}
+
+/**
+ * Exponential Moving Average
+ */
+function calculateEMA(data, currentIndex, period) {
+  const k = 2 / (period + 1);
+  const start = Math.max(0, currentIndex - period * 2);
+  let ema = parseFloat(data[start][4]);
+  for (let i = start + 1; i <= currentIndex; i++) {
+    const val = parseFloat(data[i][4]);
+    ema = val * k + ema * (1 - k);
+  }
+  return ema;
+}
